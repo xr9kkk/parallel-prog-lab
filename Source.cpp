@@ -2,7 +2,7 @@
 #include <vector>
 #include <thread>
 #include <future>
-#define NOMINMAX
+#define NOMINMAX // чтобы не конфликтовал макрос max в Windows
 #include <windows.h>
 #include <limits>
 #include <algorithm>
@@ -13,12 +13,14 @@
 #include <omp.h>
 #include <random>
 
+// Глобальный вектор для хранения случайных чисел
 std::vector<int> data{};
 
+// Генератор случайных данных
 std::vector<int> generate_random_data(size_t size = 20, int min_val = 1, int max_val = 100) {
     std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> distrib(min_val, max_val);
+    std::mt19937 gen(rd()); // генератор случайных чисел
+    std::uniform_int_distribution<> distrib(min_val, max_val); // равномерное распределение
 
     std::vector<int> result(size);
     for (auto& x : result) {
@@ -27,11 +29,11 @@ std::vector<int> generate_random_data(size_t size = 20, int min_val = 1, int max
     return result;
 }
 
-// Общая функция поиска максимального нечётного числа
+// Общая функция для поиска максимального нечетного числа в массиве
 int find_max_odd(const std::vector<int>& arr) {
     int max_val = std::numeric_limits<int>::min();
     for (int val : arr) {
-        if (val % 2 != 0) {
+        if (val % 2 != 0) { // проверка на нечетность
             max_val = std::max(max_val, val);
         }
     }
@@ -39,13 +41,14 @@ int find_max_odd(const std::vector<int>& arr) {
 }
 
 ///////////////////////
-// 1. WinAPI Thread ///
+// 1. Поток WinAPI ///
 ///////////////////////
 struct ThreadData {
     const std::vector<int>* arr;
     int result;
 };
 
+// Функция для потока WinAPI
 DWORD WINAPI winapi_thread_func(LPVOID param) {
     ThreadData* data = static_cast<ThreadData*>(param);
     data->result = find_max_odd(*data->arr);
@@ -63,6 +66,8 @@ int max_with_winapi() {
 /////////////////////////
 // 2. std::thread ///////
 /////////////////////////
+
+// Потоковая функция для std::thread
 void thread_worker(const std::vector<int>& arr, int& result) {
     result = find_max_odd(arr);
 }
@@ -70,27 +75,31 @@ void thread_worker(const std::vector<int>& arr, int& result) {
 int max_with_std_thread() {
     int result = std::numeric_limits<int>::min();
     std::thread t(thread_worker, std::cref(data), std::ref(result));
-    t.join();
+    t.join(); // дожидаемся завершения потока
     return result;
 }
 
 /////////////////////////
-// 3. std::async ////////
+// 3. std::future ///////
 /////////////////////////
+
 int max_with_future() {
+    // std::async сам запускает поток
     std::future<int> fut = std::async(std::launch::async, find_max_odd, std::cref(data));
-    return fut.get();
+    return fut.get(); // получить результат
 }
 
 /////////////////////////
 // 4. std::atomic ///////
 /////////////////////////
+
 int max_with_atomic() {
     std::atomic<int> max_val(std::numeric_limits<int>::min());
     std::thread t([&]() {
         for (int val : data) {
             if (val % 2 != 0) {
                 int current = max_val;
+                // пытаемся обновить максимум, если val больше текущего
                 while (val > current && !max_val.compare_exchange_weak(current, val));
             }
         }
@@ -100,8 +109,10 @@ int max_with_atomic() {
 }
 
 /////////////////////////
-// 5.Пул потоков + потокобезопасная очередь с объектами ядра
+// 5. Потокобезопасная очередь + пул потоков
 /////////////////////////
+
+// Потокобезопасная очередь на мьютексе и условной переменной
 class SafeQueue {
     std::queue<int> queue;
     std::mutex mtx;
@@ -132,10 +143,12 @@ int max_with_thread_pool() {
     SafeQueue q;
     std::atomic<int> max_val(std::numeric_limits<int>::min());
 
+    // Заполняем очередь
     for (int val : data) {
         q.push(val);
     }
 
+    // Рабочая функция потока
     auto worker = [&]() {
         int value;
         while (q.pop(value)) {
@@ -146,22 +159,25 @@ int max_with_thread_pool() {
         }
         };
 
+    // Создаём пул из 4 потоков
     std::vector<std::thread> pool;
     for (int i = 0; i < 4; ++i) {
         pool.emplace_back(worker);
     }
 
-    for (auto& t : pool) t.join();
+    for (auto& t : pool) t.join(); // ждём завершения всех потоков
     return max_val;
 }
 
 /////////////////////////
-// 6.Critical Section ///
+// 6. Critical Section //
 /////////////////////////
+
 CRITICAL_SECTION cs;
 std::queue<int> shared_queue;
 bool finished = false;
 
+// Производитель — кладёт значения в очередь
 DWORD WINAPI producer_func(LPVOID) {
     EnterCriticalSection(&cs);
     for (int val : data) {
@@ -172,6 +188,7 @@ DWORD WINAPI producer_func(LPVOID) {
     return 0;
 }
 
+// Потребитель — извлекает значения и находит максимум
 DWORD WINAPI consumer_func(LPVOID param) {
     int* max_val = static_cast<int*>(param);
     while (true) {
@@ -195,6 +212,7 @@ int max_with_critical_section() {
     InitializeCriticalSection(&cs);
     int max_val = std::numeric_limits<int>::min();
 
+    // Запуск двух потоков: производитель и потребитель
     HANDLE threads[2];
     threads[0] = CreateThread(nullptr, 0, producer_func, nullptr, 0, nullptr);
     threads[1] = CreateThread(nullptr, 0, consumer_func, &max_val, 0, nullptr);
@@ -208,10 +226,12 @@ int max_with_critical_section() {
 }
 
 /////////////////////////
-// 7.OpenMP /////////////
+// 7. OpenMP ///////////
 /////////////////////////
-static  int max_with_openmp() {
+
+int max_with_openmp() {
     int max_val = std::numeric_limits<int>::min();
+    // Параллельный for с редукцией максимума
 #pragma omp parallel for reduction(max:max_val)
     for (int i = 0; i < data.size(); ++i) {
         if (data[i] % 2 != 0) {
@@ -222,13 +242,16 @@ static  int max_with_openmp() {
 }
 
 /////////////////////////
-// Main //////////////////
+// main //////////////////
 int main() {
+    // Случайные данные
     data = generate_random_data();
+
     std::cout << "Array: ";
     for (const int v : data) std::cout << v << " ";
     std::cout << "\n\n";
 
+    // Результаты разных реализаций
     std::cout << "1. Max odd (WinAPI)              : " << max_with_winapi() << "\n";
     std::cout << "2. Max odd (std::thread)         : " << max_with_std_thread() << "\n";
     std::cout << "3. Max odd (std::async)          : " << max_with_future() << "\n";

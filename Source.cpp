@@ -11,8 +11,21 @@
 #include <mutex>
 #include <condition_variable>
 #include <omp.h>
+#include <random>
 
-std::vector<int> data = { 3, 2, 15, 8, 9, 10, 21, 6 };
+std::vector<int> data{};
+
+std::vector<int> generate_random_data(size_t size = 20, int min_val = 1, int max_val = 100) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distrib(min_val, max_val);
+
+    std::vector<int> result(size);
+    for (auto& x : result) {
+        x = distrib(gen);
+    }
+    return result;
+}
 
 // Общая функция поиска максимального нечётного числа
 int find_max_odd(const std::vector<int>& arr) {
@@ -211,6 +224,7 @@ static  int max_with_openmp() {
 /////////////////////////
 // Main //////////////////
 int main() {
+    data = generate_random_data();
     std::cout << "Array: ";
     for (const int v : data) std::cout << v << " ";
     std::cout << "\n\n";

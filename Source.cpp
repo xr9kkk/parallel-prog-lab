@@ -49,7 +49,7 @@ struct ThreadData {
 };
 
 // Функция для потока WinAPI
-DWORD WINAPI winapi_thread_func(LPVOID param) {
+DWORD WINAPI winapi_thread_func(LPVOID param) { //лпвойд - указатель на произвольные данные
     ThreadData* data = static_cast<ThreadData*>(param);
     data->result = find_max_odd(*data->arr);
     return 0;
@@ -74,7 +74,7 @@ void thread_worker(const std::vector<int>& arr, int& result) {
 
 int max_with_std_thread() {
     int result = std::numeric_limits<int>::min();
-    std::thread t(thread_worker, std::cref(data), std::ref(result));
+    std::thread t(thread_worker, std::cref(data), std::ref(result)); //через реф по ссылке передаем
     t.join(); // дожидаемся завершения потока
     return result;
 }
@@ -86,7 +86,7 @@ int max_with_std_thread() {
 int max_with_future() {
     // std::async сам запускает поток
     std::future<int> fut = std::async(std::launch::async, find_max_odd, std::cref(data));
-    return fut.get(); // получить результат
+    return fut.get(); // get блокирует до завершения и получает результат
 }
 
 /////////////////////////
@@ -95,12 +95,12 @@ int max_with_future() {
 
 int max_with_atomic() {
     std::atomic<int> max_val(std::numeric_limits<int>::min());
-    std::thread t([&]() {
-        for (int val : data) {
+    std::thread t([&]() { // по сути лямбда функция внутри потока
+        for (int val : data) { // может не сработать с первого раза из-за гонок — потому и цикл.
             if (val % 2 != 0) {
                 int current = max_val;
                 // пытаемся обновить максимум, если val больше текущего
-                while (val > current && !max_val.compare_exchange_weak(current, val));
+                while (val > current && !max_val.compare_exchange_weak(current, val)); // compare_exchange_weak атомарно пытается обновить значение, если val больше
             }
         }
         });
@@ -115,18 +115,18 @@ int max_with_atomic() {
 // Потокобезопасная очередь на мьютексе и условной переменной
 class SafeQueue {
     std::queue<int> queue;
-    std::mutex mtx;
-    std::condition_variable cv;
+    std::mutex mtx; // мьютекс, который защищает queue от одновременного доступа
+    std::condition_variable cv; // условная переменная (используется для ожидания/оповещения при добавлении элементов)
 
 public:
     void push(int value) {
-        std::lock_guard<std::mutex> lock(mtx);
+        std::lock_guard<std::mutex> lock(mtx); // блокирует мьютекс на время действия функции
         queue.push(value);
-        cv.notify_one();
+        cv.notify_one(); // оповещает один ожидающий поток
     }
 
     bool pop(int& value) {
-        std::unique_lock<std::mutex> lock(mtx);
+        std::lock_guard<std::mutex> lock(mtx);
         if (queue.empty()) return false;
         value = queue.front();
         queue.pop();
@@ -148,7 +148,7 @@ int max_with_thread_pool() {
         q.push(val);
     }
 
-    // Рабочая функция потока
+    // Рабочая функция потока. Каждый поток забирает значение и обновляет максимум
     auto worker = [&]() {
         int value;
         while (q.pop(value)) {
@@ -162,7 +162,7 @@ int max_with_thread_pool() {
     // Создаём пул из 4 потоков
     std::vector<std::thread> pool;
     for (int i = 0; i < 4; ++i) {
-        pool.emplace_back(worker);
+        pool.emplace_back(worker); //добавляет элемент, созданный на месте в конец очереди
     }
 
     for (auto& t : pool) t.join(); // ждём завершения всех потоков
@@ -232,7 +232,7 @@ int max_with_critical_section() {
 int max_with_openmp() {
     int max_val = std::numeric_limits<int>::min();
     // Параллельный for с редукцией максимума
-#pragma omp parallel for reduction(max:max_val)
+#pragma omp parallel for reduction(max:max_val) // директива #pragma omp parallel for распараллеливает цикл. reduction(max:max_val) делает параллельное вычисление максимума безопасным.
     for (int i = 0; i < data.size(); ++i) {
         if (data[i] % 2 != 0) {
             max_val = std::max(max_val, data[i]);
